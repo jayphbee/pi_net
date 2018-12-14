@@ -19,6 +19,7 @@ fn handle_recv(socket: Socket, stream: Arc<RwLock<Stream>>, begin: usize, end: u
 
     let func = Box::new(move |data: Result<Arc<Vec<u8>>>| {
         {
+            println!("in cb func --------------------");
             let _s_borrow = &s.read().unwrap();
 
             let b = data.unwrap();
@@ -47,8 +48,11 @@ fn handle_recv(socket: Socket, stream: Arc<RwLock<Stream>>, begin: usize, end: u
         handle_recv(socket, s, end, new_end);
     });
 
+    println!("after cb func");
+
     let r = recv(stream2.clone(), end - begin, func);
     if let Some((func, data)) = r {
+        println!("it is Some ------------------");
         func(data);
     }
 }
@@ -65,18 +69,27 @@ fn handle_bind(peer: Result<(Socket, Arc<RwLock<Stream>>)>, addr: Result<SocketA
         s.set_send_buf_size(1024 * 1024);
         s.set_recv_timeout(5 * 1000);
         s.set_socket(socket.clone());
+        println!("stream.websocket: {:?}", s.websocket);
     }
+
+    let data = [4,3,2,1];
+    let mut buf = Vec::<u8>::new();
+    buf.extend_from_slice(&data);
+
+    socket.send(Arc::new(buf));
 
     handle_recv(socket, stream, 0, 1 * 1024);
 }
 
 pub fn start_server() -> NetManager {
+    println!("start server!");
     let mgr = NetManager::new();
     let config = Config {
         protocol: Protocol::TCP,
-        addr: "127.0.0.1:1234".parse().unwrap(),
+        addr: "127.0.0.1:1235".parse().unwrap(),
     };
 
     mgr.bind(config, Box::new(|peer, addr| handle_bind(peer, addr)));
+
     return mgr;
 }

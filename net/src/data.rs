@@ -43,7 +43,7 @@ pub struct Config {
     pub addr: SocketAddr,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Websocket {
     None,
     Bin(usize, usize), //offset, size

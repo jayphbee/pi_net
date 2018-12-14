@@ -14,7 +14,9 @@ use server::start_server;
 fn run() {
     let _s = start_server();
 
+    std::thread::sleep_ms(1000);
+
     let _c = start_client();
-    sleep(Duration::from_secs(30));
+    sleep(Duration::from_secs(300));
 }
 

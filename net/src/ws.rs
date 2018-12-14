@@ -19,6 +19,7 @@ use websocket::dataframe::{DataFrame, Opcode};
 use websocket::result::{WebSocketResult, WebSocketError};
 
 pub fn read_header(stream: Arc<RwLock<Stream>>, buf: Vec<u8>, func: Box<FnBox(Result<Upgrade<Cursor<Vec<u8>>>>)>) {
+    println!("in read_header -------------");
     let stream2 = stream.clone();
     let handle_func;
     {

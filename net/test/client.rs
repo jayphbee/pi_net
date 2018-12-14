@@ -47,7 +47,7 @@ fn handle_recv(socket: Socket, stream: Arc<RwLock<Stream>>, begin: usize, end: u
 
         handle_recv(socket, s, end, new_end);
     });
-    
+
     // (RecvFn, Result<Arc<Vec<u8>>>)
     let r = recv(stream2.clone(), end - begin, func);
     if let Some((func, data)) = r {
@@ -68,7 +68,7 @@ fn handle_connect(peer: Result<(Socket, Arc<RwLock<Stream>>)>, addr: Result<Sock
     }
 
     let mut buf: Vec<u8> = vec![];
-    for i in 0..1024 {
+    for i in 0..16 {
         buf.push(i as u8);
     }
     socket.send(Arc::new(buf));
@@ -77,12 +77,24 @@ fn handle_connect(peer: Result<(Socket, Arc<RwLock<Stream>>)>, addr: Result<Sock
 }
 
 pub fn start_client() -> NetManager {
+    println!("start client");
     let mgr = NetManager::new();
     let config = Config {
         protocol: Protocol::TCP,
         addr: "127.0.0.1:1234".parse().unwrap(),
     };
-    mgr.connect(config, Box::new(|peer, addr| handle_connect(peer, addr)));
+    // mgr.connect(config, Box::new(|peer, addr| handle_connect(peer, addr)));
+
+    mgr.connect(config, Box::new(|peer: Result<(Socket, Arc<RwLock<Stream>>)>, addr: Result<SocketAddr>| {
+        let data = [1,1,1,1];
+        let mut buf = Vec::<u8>::new();
+        buf.extend_from_slice(&data);
+
+        peer.and_then(|(sock, stream)| {
+            sock.send(Arc::new(buf));
+            Ok(handle_recv(sock, stream, 0, 4))
+        });
+    }));
 
     return mgr;
 }

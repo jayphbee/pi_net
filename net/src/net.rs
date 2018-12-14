@@ -31,9 +31,10 @@ fn bind_tcp(handler: &mut NetHandler, config: Config, func: ListenerFn) {
         let key = entry.key();
 
         println!(
-            "bind_tcp listener {:?}: register, interest = {:?}",
+            "bind_tcp listener {:?}: register, interest = {:?}, local_addr: {:?}",
             key,
-            Ready::readable()
+            Ready::readable(),
+            lisn.local_addr()
         );
 
         handler
@@ -63,8 +64,8 @@ pub fn connect_tcp(handler: &mut NetHandler, config: Config, func: ListenerFn) {
         stream.interest.insert(Ready::writable());
 
         println!(
-            "connect_tcp stream {:?}: register, interest = {:?}",
-            stream.token, stream.interest
+            "connect_tcp stream {:?}: register, interest = {:?}, local_addr: {:?}, peer_addr: {:?}",
+            stream.token, stream.interest, s.local_addr(), s.peer_addr()
         );
 
         handler
@@ -95,6 +96,8 @@ pub fn handle_connect(handler: &mut NetHandler, config: Config, func: ListenerFn
 
 // return bool to indicate that should close the stream
 fn send_tcp(poll: &mut Poll, stream: &mut Stream, mio: &mut TcpStream, v8: Arc<Vec<u8>>) -> bool {
+    println!("in send_tcp xxxxxxxxxxxxxxxxx");
+    // println!("stream.socket: {} +++++++++++++++", stream.socket.unwrap().socket);
     return match State::from_usize(stream.socket.as_ref().expect("socket not exist").state.load(Ordering::SeqCst)) {
         State::Closed => panic!("error, send_tcp must not to closed state!"),
         State::WouldClose => {
@@ -107,10 +110,10 @@ fn send_tcp(poll: &mut Poll, stream: &mut Stream, mio: &mut TcpStream, v8: Arc<V
             } else {
                 if stream.send_remain_size == 0 {
                     stream.interest.insert(Ready::writable());
-                    // println!(
-                    //     "send_tcp stream {:?}: reregister, interest = {:?}",
-                    //     stream.token, stream.interest
-                    // );
+                    println!(
+                        "send_tcp stream {:?}: reregister, interest = {:?}",
+                        stream.token, stream.interest
+                    );
                     poll.reregister(mio, stream.token, stream.interest, PollOpt::level())
                         .unwrap();
                 }
@@ -142,6 +145,7 @@ pub fn handle_send(handler: &mut NetHandler, socket: usize, v8: Arc<Vec<u8>>) {
 }
 
 fn close_tcp(poll: &mut Poll, stream: &mut Stream, mio: &mut TcpStream, force: bool) {
+    println!("in close_tcp xxxxxxxxxxxxxxxxxxx");
     if force || stream.send_remain_size == 0 {
         stream.socket.as_ref().expect("socket not exist").state.swap(State::Closed as usize, Ordering::SeqCst);
         stream.interest = Ready::empty();
@@ -173,7 +177,7 @@ pub fn handle_close(handler: &mut NetHandler, socket: usize, force: bool) {
         if handler.slab.contains(socket) {
             handler.slab.remove(socket);
         }
-        
+
     }
 }
 
@@ -239,7 +243,7 @@ fn stream_recv(stream: &mut Stream, mio: &mut TcpStream) -> Option<Result<(RecvF
                     }
                 }
             }
-            
+
         };
 
         match would_block {
@@ -249,7 +253,7 @@ fn stream_recv(stream: &mut Stream, mio: &mut TcpStream) -> Option<Result<(RecvF
                     let end = stream.recv_buf_offset;
                     let func = stream.recv_callback.take().unwrap();
                     r = Some(Ok((func, start..end)));
-                    
+
                     let size2 = end - start;
                     stream.recv_callback_offset += size2;
                 } else {
@@ -264,7 +268,7 @@ fn stream_recv(stream: &mut Stream, mio: &mut TcpStream) -> Option<Result<(RecvF
                         stream.recv_callback_offset += stream.recv_size;
                     }
                 }
-                
+
             }
             Err(err) => {
                 r = Some(Err(err));
@@ -376,10 +380,10 @@ pub fn handle_net(sender: Sender<SendClosureFn>, receiver: Receiver<SendClosureF
                 &mut NetData::TcpStream(ref mut s, ref mio) => {
                     let mut stream = &mut s.write().unwrap();
                     stream.interest.insert(Ready::readable());
-                    // println!(
-                    //     "recv_comings stream {:?}: reregister, interest = {:?}",
-                    //     stream.token, stream.interest
-                    // );
+                    println!(
+                        "recv_comings stream {:?}: reregister, interest = {:?}",
+                        stream.token, stream.interest
+                    );
 
                     handler
                         .poll
@@ -412,7 +416,7 @@ pub fn handle_net(sender: Sender<SendClosureFn>, receiver: Receiver<SendClosureF
                     &mut NetData::TcpStream(ref s, ref mut mio) => {
                         if readiness.is_readable() {
                             let mut is_close = false;
-                            
+
                             let recv_r = stream_recv(&mut s.write().unwrap(), mio);
 
                             if let Some(r) = recv_r {
@@ -497,10 +501,10 @@ pub fn handle_net(sender: Sender<SendClosureFn>, receiver: Receiver<SendClosureF
                         let mut s = &mut stream.write().unwrap();
                         s.token = Token(entry.key());
 
-                        // println!(
-                        //     "net_data stream {:?}: register, interest = {:?}",
-                        //     s.token, s.interest
-                        // );
+                        println!(
+                            "net_data stream {:?}: register, interest = {:?}",
+                            s.token, s.interest
+                        );
 
                         handler
                             .poll
@@ -514,6 +518,7 @@ pub fn handle_net(sender: Sender<SendClosureFn>, receiver: Receiver<SendClosureF
             }
 
             if let Some(k) = key {
+                println!("new socket");
                 let socket = Socket::new(k, handler.sender.clone());
                 match handler.slab.get(token).unwrap() {
                     &NetData::TcpServer(ref callback, _) => {
@@ -531,9 +536,10 @@ pub fn handle_net(sender: Sender<SendClosureFn>, receiver: Receiver<SendClosureF
 
         // handle recv from logic thread
         while let Ok(func) = receiver.try_recv() {
+            println!("receiver recv items: thread_id: {:?} )))))))))))))))))))", thread::current().id());
             func.call_box((&mut handler,));
         }
-        
+
         //轮询定时器
         handler.net_timers.write().unwrap().poll();
 
@@ -624,19 +630,21 @@ impl Stream {
 
     /// size's unit: byte
     pub fn recv_handle(&mut self, size: usize, func: RecvFn) -> Option<(RecvFn, Result<Arc<Vec<u8>>>)> {
+        println!("in stream recv_handle, size: {:?}-------------------", size);
         if !self.recv_callback.is_none() {
             return Some((func, Err(Error::new(
                 ErrorKind::Other,
                 "Recive callback can't set twice",
             ))));
         }
-        
+
         self.temp_recv_buf = None;
         self.temp_recv_buf_offset = 0;
 
         let cb_offset = self.recv_callback_offset;
         let buf_offset = self.recv_buf_offset;
         if size == 0 && buf_offset > cb_offset {
+            println!("in size = 0 ---------------");
             let param = self.recv_buf[cb_offset..buf_offset]
                 .iter()
                 .cloned()
@@ -668,6 +676,7 @@ impl Stream {
             self.recv_callback_offset = 0;
             self.recv_buf_offset = len;
         }
+        println!("after many if-else -----------");
         let timeout = self.recv_timeout.unwrap();
         let timer = NetTimer::new();
         timer.set_timeout(timeout, self.token);
@@ -683,21 +692,24 @@ impl Stream {
 
 /// websocket
 pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(RecvFn, Result<Arc<Vec<u8>>>)> {
+    println!("i am in the recv func of websocket");
     let stream2 = stream.clone();
     let websocket;
     let websocket_buf;
-    {   
+    {
         websocket = stream.read().unwrap().websocket.clone();
         websocket_buf = stream.read().unwrap().websocket_buf.clone();
     }
     //是否已完成HTTP握手
     match websocket {
         Websocket::None => {
+            println!("in None arm");
             let stream2 = stream.clone();
             let http_func = Box::new(move |r: Result<Upgrade<Cursor<Vec<u8>>>>| {
                 match r {
                     Err(e) => println!("!!!> WS Handshake Error, e: {:?}", e),
                     Ok(mut ws) => {
+                        println!("websocket handshake success");
                         let stream = stream2.clone();
                         {
                             let socket2;
@@ -719,8 +731,9 @@ pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(R
             //请求握手包
             http_read_header(stream, vec![], http_func);
         },
-        
+
         Websocket::Bin(offset, len) => {
+            println!("in Bin arm");
             //判断缓存中是否取完
             if len >= size {
                 let stream = stream2.clone();
@@ -741,7 +754,7 @@ pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(R
                             if buf.len() >= size {
                                 let v = Vec::from(&buf[0..size]);
                                 let len = buf.len();
-                               
+
                                 //写入ws缓存
                                 stream.write().unwrap().websocket = Websocket::Bin(size, len - size);
                                 stream.write().unwrap().websocket_buf = buf;
@@ -755,13 +768,14 @@ pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(R
                             //立即回应关闭消息，且立即关闭连接
                             let mut socket = None;
                             {
+                                println!("ownedMessage close message");
                                 let mut s = stream.write().unwrap();
                                 if let Ok(_) = s.socket.as_ref()
                                                     .expect("socket not exist")
                                                     .state
                                                     .compare_exchange(State::Run as usize, State::WouldClose as usize, Ordering::SeqCst, Ordering::Acquire) {
                                     //客户端通知关闭，则回应关闭
-                                    socket = s.socket.clone();              
+                                    socket = s.socket.clone();
                                 } else if let Ok(_) = s.socket.as_ref()
                                                     .expect("socket not exist")
                                                     .state
@@ -770,7 +784,7 @@ pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(R
                                     s.socket.as_ref().expect("socket not exist").rclose(true);
                                 }
                             }
-                            
+
                             if let Some(s) = socket {
                                 if let Some(data) = close {
                                     if let Ok(bin) = data.into_bytes() {
@@ -788,8 +802,8 @@ pub fn recv(stream: Arc<RwLock<Stream>>, size: usize, func: RecvFn) -> Option<(R
                             func(Err(Error::new(ErrorKind::Other, "not bin")));
                         }
                     }
-                    
-                    
+
+
                 });
                 //从网络中等待websocket包
                 ws_read_header(stream, ws_func);
